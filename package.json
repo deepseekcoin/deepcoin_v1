@@ -1,0 +1,37 @@
+{
+  "name": "deepcoin",
+  "version": "1.0.0",
+  "description": "Solana meme coins analysis bot with AI predictions",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "node --no-warnings --loader ts-node/esm src/server.ts",
+    "watch": "tsc -w"
+  },
+  "keywords": [
+    "solana",
+    "trading",
+    "ai",
+    "prediction"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@jup-ag/api": "^6.0.6",
+    "@types/chart.js": "^2.9.41",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.12.0",
+    "@types/ws": "^8.5.10",
+    "axios": "^1.7.9",
+    "chart.js": "^4.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.80.1",
+    "typescript": "^5.7.3",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
+  }
+}
