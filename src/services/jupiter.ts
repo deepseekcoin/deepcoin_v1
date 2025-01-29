@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { AxiosInstance } from 'axios';
 import { config } from '../config/env.js';
 import { TokenData, JupiterPriceResponse, JupiterToken } from '../types/index.js';
+import { getTopTokensByVolume } from './dexscreener.js';
 
 class JupiterService {
     private readonly apiEndpoint: string;
@@ -19,25 +20,12 @@ class JupiterService {
     async getTopMemeTokens(limit: number = 10): Promise<JupiterToken[]> {
         console.log(`Getting top ${limit} meme tokens from Jupiter`);
         try {
-            // Get known meme tokens
-            const memeTokens: JupiterToken[] = [
-                {
-                    mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-                    symbol: 'BONK'
-                },
-                {
-                    mint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk',
-                    symbol: 'WEN'
-                },
-                {
-                    mint: 'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey',
-                    symbol: 'MNDE'
-                },
-                {
-                    mint: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
-                    symbol: 'SAMO'
-                }
-            ];
+            // Get top tokens from DexScreener
+            const topTokens = await getTopTokensByVolume();
+            const memeTokens: JupiterToken[] = topTokens.map(token => ({
+                mint: token.tokenAddress,
+                symbol: token.header || token.tokenAddress.slice(0, 6)
+            }));
 
             // Get price data for each token
             const pricePromises = memeTokens.map(token => 
@@ -86,26 +74,18 @@ class JupiterService {
                     }
                 });
 
-                const tokenInfo = priceResponse.data.data[tokenMint];
-                const extraInfo = tokenInfo.extraInfo;
+                const priceInfo = priceResponse.data.data[tokenMint];
+                const extraInfo = priceInfo.extraInfo;
 
                 // Generate price points based on available data
-                const currentPrice = parseFloat(tokenInfo.price);
+                const currentPrice = parseFloat(priceInfo.price);
                 const now = Date.now();
                 const interval = this.getTimeframeInterval(timeframe);
                 const points = this.generatePricePoints(timeframe, now, currentPrice, extraInfo);
 
-                // Find token symbol from meme tokens list
-                const memeToken = [
-                    { mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', symbol: 'BONK' },
-                    { mint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk', symbol: 'WEN' },
-                    { mint: 'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey', symbol: 'MNDE' },
-                    { mint: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', symbol: 'SAMO' }
-                ].find(t => t.mint === tokenMint);
-
                 data.push({
                     mint: tokenMint,
-                    symbol: memeToken?.symbol || tokenMint.slice(0, 6),
+                    symbol: tokenMint,
                     prices: points
                 });
 
