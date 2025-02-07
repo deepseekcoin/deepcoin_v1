@@ -3,6 +3,7 @@ import type { AxiosInstance } from 'axios';
 import { config } from '../config/env.js';
 import { TokenData, JupiterPriceResponse, JupiterToken } from '../types/index.js';
 import { getTopTokensByVolume } from './dexscreener.js';
+import { logger } from '../utils/logger.js';
 
 class JupiterService {
     private readonly apiEndpoint: string;
@@ -18,13 +19,13 @@ class JupiterService {
     }
 
     async getTopMemeTokens(limit: number = 10): Promise<JupiterToken[]> {
-        console.log(`Getting top ${limit} meme tokens from Jupiter`);
+        logger.info(`Getting top ${limit} meme tokens from Jupiter`, 'JUPITER');
         try {
             // Get top tokens from DexScreener
             const topTokens = await getTopTokensByVolume();
             const memeTokens: JupiterToken[] = topTokens.map(token => ({
                 mint: token.tokenAddress,
-                symbol: token.header || token.tokenAddress.slice(0, 6)
+                symbol: token.tokenAddress
             }));
 
             // Get price data for each token
@@ -51,16 +52,16 @@ class JupiterService {
                 };
             }).sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
 
-            console.log('Found meme tokens:', tokensWithPrice);
+            logger.info(`Found meme tokens: ${JSON.stringify(tokensWithPrice)}`, 'JUPITER');
             return tokensWithPrice.slice(0, limit);
         } catch (error) {
-            console.error('Error fetching tokens from Jupiter:', error);
+            logger.error('Error fetching tokens from Jupiter', error, 'JUPITER');
             throw error;
         }
     }
 
     async collectPriceData(timeframe: string, tokens: string[]): Promise<TokenData[]> {
-        console.log(`Collecting ${timeframe} data for tokens:`, tokens);
+        logger.info(`Collecting ${timeframe} data for tokens: ${JSON.stringify(tokens)}`, 'JUPITER');
         const data: TokenData[] = [];
 
         for (const tokenMint of tokens) {
@@ -92,7 +93,7 @@ class JupiterService {
                 // Rate limiting
                 await new Promise(resolve => setTimeout(resolve, 500));
             } catch (error) {
-                console.error(`Error collecting data for ${tokenMint}:`, error);
+                logger.error(`Error collecting data for ${tokenMint}`, error, 'JUPITER');
             }
         }
 
@@ -111,7 +112,7 @@ class JupiterService {
         for (let i = 0; i < dataPoints; i++) {
             const timestamp = endTime - (dataPoints - i - 1) * interval;
             const variation = (Math.random() - 0.5) * avgImpact * currentPrice;
-            const price = currentPrice + variation;
+            const price = Math.max(0.000001, currentPrice + variation); // Ensure price never goes below a minimum positive value
             
             points.push({
                 timestamp,

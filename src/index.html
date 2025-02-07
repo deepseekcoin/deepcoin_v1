@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DeepCoin Analysis</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -21,6 +21,8 @@
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 20px;
+            height: 400px;
+            position: relative;
         }
         h1, h2 {
             color: #4CAF50;
@@ -113,14 +115,9 @@
             </div>
         </div>
 
-        <div class="chart-container">
-            <h2>Price History</h2>
-            <canvas id="priceChart"></canvas>
-        </div>
-
-        <div class="chart-container">
-            <h2>Price Predictions</h2>
-            <canvas id="predictionChart"></canvas>
+        <div class="chart-container" id="tradingview-chart">
+            <h2>Price Chart</h2>
+            <div id="chart"></div>
             <div class="levels">
                 <div class="level">
                     <div class="level-label">Support Levels</div>
@@ -137,10 +134,60 @@
     <div id="status" class="status">Connecting...</div>
 
     <script>
+        // Initialize TradingView chart
+        const chartOptions = {
+            width: document.getElementById('chart').clientWidth,
+            height: 350,
+            layout: {
+                background: { type: 'solid', color: '#2d2d2d' },
+                textColor: '#ffffff',
+            },
+            grid: {
+                vertLines: { color: '#404040' },
+                horzLines: { color: '#404040' },
+            },
+            crosshair: {
+                mode: 1, // Normal crosshair mode
+            },
+            priceScale: {
+                borderColor: '#485c7b',
+            },
+            timeScale: {
+                borderColor: '#485c7b',
+                timeVisible: true,
+            },
+        };
+
+        // Create chart instance
+        const chart = LightweightCharts.createChart(document.getElementById('chart'), chartOptions);
+
+        // Create series for actual price and predictions
+        const mainSeries = chart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderVisible: false,
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350'
+        });
+
+        const predictionSeries = chart.addCandlestickSeries({
+            upColor: '#FFA726',
+            downColor: '#FF7043',
+            borderVisible: false,
+            wickUpColor: '#FFA726',
+            wickDownColor: '#FF7043'
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            chart.applyOptions({
+                width: document.getElementById('chart').clientWidth,
+            });
+        });
+
         // WebSocket connection
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         let ws = new WebSocket(`${protocol}//${window.location.host}`);
-        let priceChart, predictionChart;
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 5;
         const reconnectDelay = 2000;
@@ -216,7 +263,16 @@
                     data.volume.toFixed(2);
             }
 
-            updatePriceChart(data.priceData);
+            // Update chart with candlestick data
+            const chartData = data.priceData.map(d => ({
+                time: Math.floor(d.timestamp / 1000),
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close
+            }));
+            
+            mainSeries.setData(chartData);
         }
 
         function updatePredictionData(data) {
@@ -237,139 +293,17 @@
                     data.resistanceLevels.map(l => l.toFixed(8)).join(', ');
             }
 
-            updatePredictionChart(data.predictions);
-        }
-
-        function updatePriceChart(priceData) {
-            if (!priceData) return;
-
-            if (!priceChart) {
-                const ctx = document.getElementById('priceChart').getContext('2d');
-                priceChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: [],
-                        datasets: [{
-                            label: 'Price',
-                            data: [],
-                            borderColor: '#4CAF50',
-                            tension: 0.4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        interaction: {
-                            intersect: false,
-                            mode: 'index'
-                        },
-                        scales: {
-                            y: {
-                                grid: {
-                                    color: '#333'
-                                },
-                                ticks: {
-                                    color: '#fff'
-                                }
-                            },
-                            x: {
-                                grid: {
-                                    color: '#333'
-                                },
-                                ticks: {
-                                    color: '#fff'
-                                }
-                            }
-                        },
-                        plugins: {
-                            legend: {
-                                labels: {
-                                    color: '#fff'
-                                }
-                            }
-                        }
-                    }
-                });
+            // Update prediction series
+            if (data.predictions && data.predictions.predicted) {
+                const predictionData = data.predictions.predicted.map(d => ({
+                    time: Math.floor(d.timestamp / 1000),
+                    open: d.open,
+                    high: d.high,
+                    low: d.low,
+                    close: d.close
+                }));
+                predictionSeries.setData(predictionData);
             }
-
-            priceChart.data.labels = priceData.map(d => 
-                new Date(d.timestamp).toLocaleTimeString());
-            priceChart.data.datasets[0].data = priceData.map(d => d.price);
-            priceChart.update();
-        }
-
-        function updatePredictionChart(predictions) {
-            if (!predictions) return;
-
-            if (!predictionChart) {
-                const ctx = document.getElementById('predictionChart').getContext('2d');
-                predictionChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: [],
-                        datasets: [{
-                            label: 'Actual',
-                            data: [],
-                            borderColor: '#4CAF50',
-                            tension: 0.4
-                        }, {
-                            label: 'Predicted',
-                            data: [],
-                            borderColor: '#FFA726',
-                            borderDash: [5, 5],
-                            tension: 0.4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        interaction: {
-                            intersect: false,
-                            mode: 'index'
-                        },
-                        scales: {
-                            y: {
-                                grid: {
-                                    color: '#333'
-                                },
-                                ticks: {
-                                    color: '#fff'
-                                }
-                            },
-                            x: {
-                                grid: {
-                                    color: '#333'
-                                },
-                                ticks: {
-                                    color: '#fff'
-                                }
-                            }
-                        },
-                        plugins: {
-                            legend: {
-                                labels: {
-                                    color: '#fff'
-                                }
-                            }
-                        }
-                    }
-                });
-            }
-
-            const timestamps = [...predictions.actual.map(d => d.timestamp), 
-                             ...predictions.predicted.map(d => d.timestamp)];
-            predictionChart.data.labels = timestamps.map(t => 
-                new Date(t).toLocaleTimeString());
-            
-            predictionChart.data.datasets[0].data = predictions.actual.map(d => ({
-                x: new Date(d.timestamp).toLocaleTimeString(),
-                y: d.price
-            }));
-            
-            predictionChart.data.datasets[1].data = predictions.predicted.map(d => ({
-                x: new Date(d.timestamp).toLocaleTimeString(),
-                y: d.price
-            }));
-            
-            predictionChart.update();
         }
 
         // Initialize WebSocket connection

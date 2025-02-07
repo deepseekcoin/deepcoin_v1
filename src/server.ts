@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { logger } from './utils/logger.js';
 import { DeepCoinBot } from './index.js';
 import { VisualizationService } from './services/visualization.js';
 
@@ -11,8 +12,19 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 
-// Create visualization service
-export const visualizationService = new VisualizationService(server);
+// Create and initialize visualization service
+export let visualizationService: VisualizationService;
+
+const initializeServices = async () => {
+    visualizationService = new VisualizationService(server);
+    await visualizationService.initialize();
+};
+
+// Initialize services
+initializeServices().catch(error => {
+    logger.error('Error initializing services:', error, 'SERVER_START');
+    process.exit(1);
+});
 
 // Serve static files from src directory
 app.use(express.static(path.join(__dirname)));
@@ -28,18 +40,18 @@ app.get('*', (req, res) => {
 // Start the server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+    logger.info(`Server running at http://localhost:${PORT}`, 'SERVER_START');
 });
 
 // Start the bot
 const bot = new DeepCoinBot();
 bot.start().catch(error => {
-    console.error('Error starting bot:', error);
+    logger.error('Error starting bot:', error, 'BOT_START');
 });
 
 // Handle graceful shutdown
 const shutdown = () => {
-    console.log('Stopping DeepCoin Bot...');
+    logger.info('Stopping DeepCoin Bot...', 'SERVER_SHUTDOWN');
     server.close(() => {
         process.exit(0);
     });

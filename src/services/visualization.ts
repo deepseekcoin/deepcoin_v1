@@ -1,6 +1,8 @@
 import { WebSocketServer } from 'ws';
 import { TokenData, PricePrediction } from '../types/index.js';
 import type { WebSocket } from 'ws';
+import { logger } from '../utils/logger.js';
+import { StorageService } from './storage.js';
 
 export class VisualizationService {
     private wss: WebSocketServer;
@@ -9,12 +11,15 @@ export class VisualizationService {
     private currentPrediction: PricePrediction | null = null;
     private heartbeatInterval: NodeJS.Timeout | null = null;
 
+    private storageService: StorageService;
+
     constructor(server: any) {
         this.wss = new WebSocketServer({ server });
         this.clients = new Set();
+        this.storageService = new StorageService();
 
         this.wss.on('connection', (ws: WebSocket) => {
-            console.log('New client connected');
+            logger.info('New client connected', 'WS_SERVER');
             this.clients.add(ws);
 
             // Send current data if available
@@ -30,19 +35,19 @@ export class VisualizationService {
                         ws.send(JSON.stringify({ type: 'pong' }));
                     }
                 } catch (error) {
-                    console.error('Error handling client message:', error);
+                    logger.error('Error handling client message', error, 'WS_SERVER');
                 }
             });
 
             // Handle client disconnection
             ws.on('close', () => {
-                console.log('Client disconnected');
+                logger.info('Client disconnected', 'WS_SERVER');
                 this.clients.delete(ws);
             });
 
             // Handle errors
             ws.on('error', (error) => {
-                console.error('WebSocket error:', error);
+                logger.error('WebSocket error', error, 'WS_SERVER');
                 this.clients.delete(ws);
             });
         });
@@ -62,7 +67,7 @@ export class VisualizationService {
                     try {
                         client.send(JSON.stringify({ type: 'heartbeat' }));
                     } catch (error) {
-                        console.error('Error sending heartbeat:', error);
+                        logger.error('Error sending heartbeat', error, 'WS_SERVER');
                         this.clients.delete(client);
                     }
                 } else {
@@ -72,36 +77,76 @@ export class VisualizationService {
         }, 30000); // Every 30 seconds
     }
 
-    updatePriceData(token: TokenData) {
-        console.log(`Updating price data for ${token.symbol}`);
+    public async initialize() {
+        await this.storageService.initialize();
+        
+        // Load saved data
+        this.currentToken = await this.storageService.loadMarketData();
+        this.currentPrediction = await this.storageService.loadPredictionData();
+        
+        if (this.currentToken) {
+            logger.info(`Loaded market data for ${this.currentToken.symbol}`, 'WS_SERVER');
+        }
+        if (this.currentPrediction) {
+            logger.info('Loaded prediction data', 'WS_SERVER');
+        }
+    }
+
+    async updatePriceData(token: TokenData) {
+        logger.info(`Updating price data for ${token.symbol}`, 'WS_SERVER');
         this.currentToken = token;
+        await this.storageService.saveMarketData(token);
         this.broadcastPriceUpdate();
     }
 
-    updatePrediction(prediction: PricePrediction) {
-        console.log('Updating prediction data');
+    async updatePrediction(prediction: PricePrediction) {
+        logger.info('Updating prediction data', 'WS_SERVER');
         this.currentPrediction = prediction;
+        await this.storageService.savePredictionData(prediction);
         this.broadcastPredictionUpdate();
     }
 
-    updateData(token: TokenData, predictions: PricePrediction) {
+    async updateData(token: TokenData, predictions: PricePrediction) {
         this.currentToken = token;
         this.currentPrediction = predictions;
+        await Promise.all([
+            this.storageService.saveMarketData(token),
+            this.storageService.savePredictionData(predictions)
+        ]);
         this.broadcastUpdate();
     }
 
     private broadcastPriceUpdate() {
         if (this.clients.size === 0 || !this.currentToken) return;
 
+        // Calculate OHLC data from price points
+        const priceData = this.currentToken.prices.map((p, i, arr) => {
+            const basePrice = p.price;
+            // For the first point or if there's a gap, use the same price for OHLC
+            const prevPrice = i > 0 ? arr[i - 1].price : basePrice;
+            
+            // Calculate OHLC based on price movement
+            const open = prevPrice;
+            const close = basePrice;
+            const high = Math.max(open, close);
+            const low = Math.min(open, close);
+
+            return {
+                timestamp: p.timestamp,
+                open,
+                high,
+                low,
+                close,
+                volume: p.volume
+            };
+        });
+
         const data = {
             type: 'price',
             tokenName: this.currentToken.symbol,
             currentPrice: this.currentToken.prices[this.currentToken.prices.length - 1].price,
             volume: this.currentToken.prices[this.currentToken.prices.length - 1].volume,
-            priceData: this.currentToken.prices.map(p => ({
-                timestamp: p.timestamp,
-                price: p.price
-            }))
+            priceData: priceData
         };
 
         this.broadcast(data);
@@ -117,15 +162,23 @@ export class VisualizationService {
             supportLevels: this.currentPrediction.supportLevels,
             resistanceLevels: this.currentPrediction.resistanceLevels,
             predictions: {
-                actual: this.currentToken.prices.map(p => ({
-                    timestamp: p.timestamp,
-                    price: p.price
-                })),
-                predicted: this.currentPrediction.timepoints.map(p => ({
-                    timestamp: p.timestamp,
-                    price: p.price,
-                    confidence: p.confidence
-                }))
+                predicted: this.currentPrediction.timepoints.map((p, i, arr) => {
+                    const basePrice = p.price;
+                    const prevPrice = i > 0 ? arr[i - 1].price : basePrice;
+                    const open = prevPrice;
+                    const close = basePrice;
+                    const high = Math.max(open, close);
+                    const low = Math.min(open, close);
+
+                    return {
+                        timestamp: p.timestamp,
+                        open,
+                        high,
+                        low,
+                        close,
+                        confidence: p.confidence
+                    };
+                })
             }
         };
 
@@ -146,7 +199,7 @@ export class VisualizationService {
                 try {
                     client.send(message);
                 } catch (error) {
-                    console.error('Error sending data to client:', error);
+                    logger.error('Error sending data to client', error, 'WS_SERVER');
                     this.clients.delete(client);
                 }
             } else {
@@ -158,15 +211,29 @@ export class VisualizationService {
     private sendUpdate(client: WebSocket) {
         if (this.currentToken) {
             try {
+                // Format price data for TradingView chart
                 const priceData = {
                     type: 'price',
                     tokenName: this.currentToken.symbol,
                     currentPrice: this.currentToken.prices[this.currentToken.prices.length - 1].price,
                     volume: this.currentToken.prices[this.currentToken.prices.length - 1].volume,
-                    priceData: this.currentToken.prices.map(p => ({
-                        timestamp: p.timestamp,
-                        price: p.price
-                    }))
+                    priceData: this.currentToken.prices.map((p, i, arr) => {
+                        const basePrice = p.price;
+                        const prevPrice = i > 0 ? arr[i - 1].price : basePrice;
+                        const open = prevPrice;
+                        const close = basePrice;
+                        const high = Math.max(open, close);
+                        const low = Math.min(open, close);
+
+                        return {
+                            timestamp: p.timestamp,
+                            open,
+                            high,
+                            low,
+                            close,
+                            volume: p.volume
+                        };
+                    })
                 };
                 client.send(JSON.stringify(priceData));
 
@@ -178,21 +245,29 @@ export class VisualizationService {
                         supportLevels: this.currentPrediction.supportLevels,
                         resistanceLevels: this.currentPrediction.resistanceLevels,
                         predictions: {
-                            actual: this.currentToken.prices.map(p => ({
-                                timestamp: p.timestamp,
-                                price: p.price
-                            })),
-                            predicted: this.currentPrediction.timepoints.map(p => ({
-                                timestamp: p.timestamp,
-                                price: p.price,
-                                confidence: p.confidence
-                            }))
+                            predicted: this.currentPrediction.timepoints.map((p, i, arr) => {
+                                const basePrice = p.price;
+                                const prevPrice = i > 0 ? arr[i - 1].price : basePrice;
+                                const open = prevPrice;
+                                const close = basePrice;
+                                const high = Math.max(open, close);
+                                const low = Math.min(open, close);
+
+                                return {
+                                    timestamp: p.timestamp,
+                                    open,
+                                    high,
+                                    low,
+                                    close,
+                                    confidence: p.confidence
+                                };
+                            })
                         }
                     };
                     client.send(JSON.stringify(predictionData));
                 }
             } catch (error) {
-                console.error('Error sending update to client:', error);
+                logger.error('Error sending update to client', error, 'WS_SERVER');
                 this.clients.delete(client);
             }
         }

@@ -1,46 +1,55 @@
 import { jupiterService } from './services/jupiter.js';
 import { aiService } from './services/ai.js';
 import { visualizationService } from './server.js';
+import { logger } from './utils/logger.js';
 import { TokenData, TimeFrame } from './types/index.js';
 import { config } from './config/env.js';
 
 export class DeepCoinBot {
     private selectedTokens: string[] = [];
     private lastAnalysis: Map<string, number> = new Map();
-    private analysisInterval: NodeJS.Timeout | null = null;
     private readonly maxRetries = 3;
     private readonly retryDelay = 2000; // 2 seconds
 
     async start() {
-        console.log('Starting DeepCoin Bot...');
+        logger.info('Starting DeepCoin Bot...', 'BOT_INIT');
         try {
             await this.runAnalysisPipeline();
-            this.startAnalysisLoop();
+            await this.startAnalysisLoop(); // Changed to await since it's now an infinite loop
         } catch (error) {
-            console.error('Error starting bot:', error);
+            logger.error('Error starting bot:', error, 'BOT_INIT');
             throw error;
         }
     }
 
-    private startAnalysisLoop() {
-        // Run analysis every minute
-        this.analysisInterval = setInterval(async () => {
+    private async startAnalysisLoop() {
+        while (true) {
             try {
                 await this.runAnalysisPipeline();
+                // Wait for one minute after completing all requests
+                await new Promise(resolve => setTimeout(resolve, 60000));
             } catch (error) {
-                console.error('Error in analysis loop:', error);
+                logger.error('Error in analysis loop:', error, 'ANALYSIS_LOOP');
+                // Still wait before retrying on error
+                await new Promise(resolve => setTimeout(resolve, 60000));
             }
-        }, config.timeframes.minutely.interval);
+        }
     }
 
     private async runAnalysisPipeline() {
         try {
-            console.log('Fetching top meme tokens...');
+            logger.info('Fetching top meme tokens...', 'TOKEN_FETCH');
             const tokens = await jupiterService.getTopMemeTokens(10);
             
             // Daily analysis to find promising tokens
-            console.log('Analyzing daily data...');
+            logger.info('Analyzing daily data...', 'DAILY_ANALYSIS');
             const dailyData = await this.collectTimeframeData('daily', tokens.map(t => t.mint));
+            
+            // Update visualization with first token's data immediately
+            if (dailyData.length > 0) {
+                visualizationService.updatePriceData(dailyData[0]);
+            }
+            
             const dailyAnalysis = await this.analyzeTimeframe(dailyData);
             
             // Update selected tokens
@@ -48,24 +57,24 @@ export class DeepCoinBot {
 
             // Hourly analysis of selected tokens
             if (this.selectedTokens.length > 0) {
-                console.log('Analyzing hourly data for selected tokens...');
+                logger.info('Analyzing hourly data for selected tokens...', 'HOURLY_ANALYSIS');
                 const hourlyData = await this.collectTimeframeData('hourly', this.selectedTokens);
                 const hourlyAnalysis = await this.analyzeTimeframe(hourlyData);
                 
                 // Detailed analysis of most promising tokens
-                console.log('Starting detailed analysis for most promising tokens...');
+                logger.info('Starting detailed analysis for most promising tokens...', 'DETAILED_ANALYSIS');
                 for (const token of hourlyAnalysis.selectedTokens) {
                     await this.analyzeMinuteData(token);
                 }
             }
         } catch (error) {
-            console.error('Error in analysis pipeline:', error);
+            logger.error('Error in analysis pipeline:', error, 'ANALYSIS_PIPELINE');
             throw error;
         }
     }
 
     private async collectTimeframeData(timeframe: TimeFrame, tokens: string[]): Promise<TokenData[]> {
-        console.log(`Collecting ${timeframe} data for ${tokens.length} tokens...`);
+        logger.info(`Collecting ${timeframe} data for ${tokens.length} tokens...`, 'DATA_COLLECTION');
         let retries = this.maxRetries;
         while (retries > 0) {
             try {
@@ -73,10 +82,10 @@ export class DeepCoinBot {
             } catch (error) {
                 retries--;
                 if (retries === 0) {
-                    console.error(`Failed to collect ${timeframe} data after ${this.maxRetries} attempts`);
+                    logger.error(`Failed to collect ${timeframe} data after ${this.maxRetries} attempts`, null, 'DATA_COLLECTION');
                     throw error;
                 }
-                console.log(`Retrying data collection, ${retries} attempts remaining...`);
+                logger.info(`Retrying data collection, ${retries} attempts remaining...`, 'DATA_COLLECTION_RETRY');
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
             }
         }
@@ -105,7 +114,7 @@ export class DeepCoinBot {
             try {
                 visualizationService.updatePriceData(token);
             } catch (error) {
-                console.error('Error updating price data:', error);
+                logger.error('Error updating price data:', error, 'PRICE_UPDATE');
             }
 
             // Get and update predictions
@@ -113,7 +122,7 @@ export class DeepCoinBot {
                 const predictions = await aiService.predictPrices(token, 'minutely');
                 visualizationService.updatePrediction(predictions);
             } catch (error) {
-                console.error('Error updating predictions:', error);
+                logger.error('Error updating predictions:', error, 'PREDICTION_UPDATE');
                 
                 // Use fallback prediction if AI fails
                 const fallbackPrediction = {
@@ -132,15 +141,13 @@ export class DeepCoinBot {
             this.lastAnalysis.set(tokenMint, Date.now());
 
         } catch (error) {
-            console.error(`Error analyzing minute data for ${tokenMint}:`, error);
+            logger.error(`Error analyzing minute data for ${tokenMint}:`, error, 'MINUTE_ANALYSIS');
         }
     }
 
     stop() {
-        if (this.analysisInterval) {
-            clearInterval(this.analysisInterval);
-            this.analysisInterval = null;
-        }
-        console.log('Stopping DeepCoin Bot...');
+        logger.info('Stopping DeepCoin Bot...', 'BOT_SHUTDOWN');
+        // Note: The bot will stop at the next iteration of the analysis loop
+        // when the process is terminated
     }
 }

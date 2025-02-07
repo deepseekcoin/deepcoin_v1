@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { logger } from '../utils/logger.js';
 
 const DEXSCREENER_API_URL = 'https://api.dexscreener.com/token-boosts/top/v1';
 
@@ -20,7 +21,7 @@ interface TokenBoost {
 
 export async function getTopTokensByVolume(): Promise<TokenBoost[]> {
   try {
-    console.log('Fetching top tokens from DexScreener');
+    logger.info('Fetching top tokens from DexScreener', 'DEXSCREENER');
     const response = await axios.get<TokenBoost[]>(DEXSCREENER_API_URL);
     
     // Sort tokens by totalAmount (volume) in descending order
@@ -29,10 +30,10 @@ export async function getTopTokensByVolume(): Promise<TokenBoost[]> {
     // Return top 10 tokens
     const topTokens = sortedTokens.slice(0, 10);
 
-    console.log('Successfully fetched top tokens', { count: topTokens.length });
+    logger.info(`Successfully fetched top tokens { count: ${topTokens.length} }`, 'DEXSCREENER');
     return topTokens;
   } catch (error) {
-    console.error('Error fetching top tokens from DexScreener', { error });
+    logger.error('Error fetching top tokens from DexScreener', error, 'DEXSCREENER');
     throw error;
   }
 }
