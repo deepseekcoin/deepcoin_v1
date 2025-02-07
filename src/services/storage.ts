@@ -18,10 +18,14 @@ export class StorageService {
         this.predictionDataPath = path.join(this.dataDir, 'prediction-data.json');
     }
 
-    async initialize(): Promise<void> {
+    async initialize(clearCache: boolean = false): Promise<void> {
         try {
             await fs.mkdir(this.dataDir, { recursive: true });
             
+            if (clearCache) {
+                await this.clearCache();
+            }
+
             // Create files if they don't exist
             await this.ensureFile(this.marketDataPath);
             await this.ensureFile(this.predictionDataPath);
@@ -30,6 +34,16 @@ export class StorageService {
         } catch (error) {
             logger.error('Error initializing storage service:', error, 'STORAGE');
             throw error;
+        }
+    }
+
+    private async clearCache(): Promise<void> {
+        try {
+            await fs.unlink(this.marketDataPath);
+            await fs.unlink(this.predictionDataPath);
+            logger.info('Cache cleared', 'STORAGE');
+        } catch (error) {
+            logger.error('Error clearing cache:', error, 'STORAGE');
         }
     }
 

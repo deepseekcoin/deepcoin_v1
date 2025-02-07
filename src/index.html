@@ -24,6 +24,33 @@
             height: 400px;
             position: relative;
         }
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .timeframe-controls {
+            display: flex;
+            gap: 10px;
+        }
+        .timeframe-btn {
+            background-color: #404040;
+            border: none;
+            color: #888;
+            padding: 5px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .timeframe-btn:hover {
+            background-color: #505050;
+            color: #fff;
+        }
+        .timeframe-btn.active {
+            background-color: #4CAF50;
+            color: #fff;
+        }
         h1, h2 {
             color: #4CAF50;
         }
@@ -116,7 +143,14 @@
         </div>
 
         <div class="chart-container" id="tradingview-chart">
-            <h2>Price Chart</h2>
+            <div class="chart-header">
+                <h2>Price Chart</h2>
+                <div class="timeframe-controls">
+                    <button class="timeframe-btn" data-timeframe="minutely">1m</button>
+                    <button class="timeframe-btn" data-timeframe="hourly">1h</button>
+                    <button class="timeframe-btn active" data-timeframe="daily">1d</button>
+                </div>
+            </div>
             <div id="chart"></div>
             <div class="levels">
                 <div class="level">
@@ -129,11 +163,78 @@
                 </div>
             </div>
         </div>
+        <div class="json-display">
+            <h2>Raw Data</h2>
+            <div class="data-controls">
+                <div class="timeframe-controls">
+                    <button class="data-btn" data-type="price" data-timeframe="minutely">1m Price Data</button>
+                    <button class="data-btn" data-type="price" data-timeframe="hourly">1h Price Data</button>
+                    <button class="data-btn" data-type="price" data-timeframe="daily">1d Price Data</button>
+                </div>
+                <div class="prediction-controls">
+                    <button class="data-btn" data-type="prediction" data-content="timepoints">Price Predictions</button>
+                    <button class="data-btn" data-type="prediction" data-content="levels">Support/Resistance</button>
+                </div>
+            </div>
+            <pre id="rawData">-</pre>
+        </div>
+
+        <style>
+            .data-controls {
+                margin-bottom: 15px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .timeframe-controls, .prediction-controls {
+                display: flex;
+                gap: 10px;
+            }
+            .data-btn {
+                background-color: #404040;
+                border: none;
+                color: #888;
+                padding: 5px 15px;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+            }
+            .data-btn:hover {
+                background-color: #505050;
+                color: #fff;
+            }
+            .data-btn.active {
+                background-color: #4CAF50;
+                color: #fff;
+            }
+        </style>
     </div>
 
     <div id="status" class="status">Connecting...</div>
 
+    <style>
+        .json-display {
+            background-color: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            overflow: auto;
+            max-height: 300px;
+        }
+        .json-display pre {
+            color: #fff;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin: 0;
+        }
+    </style>
+
     <script>
+        let currentTimeframe = 'daily';
+        let currentToken = null;
+        let currentPrediction = null;
+
         // Initialize TradingView chart
         const chartOptions = {
             width: document.getElementById('chart').clientWidth,
@@ -185,6 +286,25 @@
             });
         });
 
+        // Handle timeframe changes
+        document.querySelectorAll('.timeframe-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                const timeframe = button.dataset.timeframe;
+                if (timeframe === currentTimeframe) return;
+
+                // Update active button
+                document.querySelector('.timeframe-btn.active').classList.remove('active');
+                button.classList.add('active');
+
+                // Update timeframe and request new data
+                currentTimeframe = timeframe;
+                ws.send(JSON.stringify({ 
+                    type: 'timeframe',
+                    timeframe: currentTimeframe
+                }));
+            });
+        });
+
         // WebSocket connection
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         let ws = new WebSocket(`${protocol}//${window.location.host}`);
@@ -203,6 +323,11 @@
                 console.log('WebSocket connected');
                 updateStatus(true);
                 reconnectAttempts = 0;
+                // Request initial data with default timeframe
+                ws.send(JSON.stringify({ 
+                    type: 'timeframe',
+                    timeframe: currentTimeframe
+                }));
             };
 
             ws.onmessage = (event) => {
@@ -210,10 +335,33 @@
                 
                 switch (data.type) {
                     case 'price':
+                        currentToken = data.rawData;
                         updatePriceData(data);
+                        // Update raw data if price data button is active
+                        const activePriceBtn = document.querySelector('.data-btn[data-type="price"].active');
+                        if (activePriceBtn && activePriceBtn.dataset.timeframe === currentTimeframe) {
+                            document.getElementById('rawData').textContent = 
+                                JSON.stringify(currentToken.prices || [], null, 2);
+                        }
                         break;
                     case 'prediction':
+                        currentPrediction = data.rawData;
                         updatePredictionData(data);
+                        // Update raw data if prediction button is active
+                        const activePredBtn = document.querySelector('.data-btn[data-type="prediction"].active');
+                        if (activePredBtn) {
+                            const content = activePredBtn.dataset.content;
+                            if (content === 'timepoints') {
+                                document.getElementById('rawData').textContent = 
+                                    JSON.stringify(currentPrediction.timepoints || [], null, 2);
+                            } else if (content === 'levels') {
+                                document.getElementById('rawData').textContent = 
+                                    JSON.stringify({
+                                        supportLevels: currentPrediction.supportLevels || [],
+                                        resistanceLevels: currentPrediction.resistanceLevels || []
+                                    }, null, 2);
+                            }
+                        }
                         break;
                     case 'heartbeat':
                         ws.send(JSON.stringify({ type: 'ping' }));
@@ -248,6 +396,13 @@
                 ws = new WebSocket(`${protocol}//${window.location.host}`);
                 setupWebSocket();
             }, reconnectDelay);
+        }
+
+        function updateRawData(data) {
+            if (data) {
+                document.getElementById('rawData').textContent = 
+                    JSON.stringify(data, null, 2);
+            }
         }
 
         function updatePriceData(data) {
@@ -305,6 +460,42 @@
                 predictionSeries.setData(predictionData);
             }
         }
+
+        // Handle data selection buttons
+        document.querySelectorAll('.data-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                const type = button.dataset.type;
+                
+                // Remove active class from all buttons in the same group
+                document.querySelectorAll(`.data-btn[data-type="${type}"]`).forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                
+                // Add active class to clicked button
+                button.classList.add('active');
+
+                // Update raw data display based on selection
+                if (type === 'price' && currentToken) {
+                    const timeframe = button.dataset.timeframe;
+                    if (timeframe === currentTimeframe) {
+                        document.getElementById('rawData').textContent = 
+                            JSON.stringify(currentToken.prices || [], null, 2);
+                    }
+                } else if (type === 'prediction' && currentPrediction) {
+                    const content = button.dataset.content;
+                    if (content === 'timepoints') {
+                        document.getElementById('rawData').textContent = 
+                            JSON.stringify(currentPrediction.timepoints || [], null, 2);
+                    } else if (content === 'levels') {
+                        document.getElementById('rawData').textContent = 
+                            JSON.stringify({
+                                supportLevels: currentPrediction.supportLevels || [],
+                                resistanceLevels: currentPrediction.resistanceLevels || []
+                            }, null, 2);
+                    }
+                }
+            });
+        });
 
         // Initialize WebSocket connection
         setupWebSocket();

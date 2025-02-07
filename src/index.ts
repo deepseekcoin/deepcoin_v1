@@ -4,6 +4,7 @@ import { visualizationService } from './server.js';
 import { logger } from './utils/logger.js';
 import { TokenData, TimeFrame } from './types/index.js';
 import { config } from './config/env.js';
+import { StorageService } from './services/storage.js';
 
 export class DeepCoinBot {
     private selectedTokens: string[] = [];
@@ -14,6 +15,9 @@ export class DeepCoinBot {
     async start() {
         logger.info('Starting DeepCoin Bot...', 'BOT_INIT');
         try {
+            const storageService = new StorageService();
+            await storageService.initialize(true); // Clear cache on start
+            
             await this.runAnalysisPipeline();
             await this.startAnalysisLoop(); // Changed to await since it's now an infinite loop
         } catch (error) {

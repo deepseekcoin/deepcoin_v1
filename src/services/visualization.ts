@@ -10,6 +10,7 @@ export class VisualizationService {
     private currentToken: TokenData | null = null;
     private currentPrediction: PricePrediction | null = null;
     private heartbeatInterval: NodeJS.Timeout | null = null;
+    private timeframeData: Map<string, TokenData> = new Map();
 
     private storageService: StorageService;
 
@@ -28,11 +29,23 @@ export class VisualizationService {
             }
 
             // Handle client messages
-            ws.on('message', (message) => {
+            ws.on('message', async (message) => {
                 try {
                     const data = JSON.parse(message.toString());
-                    if (data.type === 'ping') {
-                        ws.send(JSON.stringify({ type: 'pong' }));
+                    switch (data.type) {
+                        case 'ping':
+                            ws.send(JSON.stringify({ type: 'pong' }));
+                            break;
+                        case 'timeframe':
+                            if (this.currentToken) {
+                                logger.info(`Timeframe changed to ${data.timeframe}`, 'WS_SERVER');
+                                // Use existing data with new timeframe
+                                this.broadcastPriceUpdate(data.timeframe);
+                                if (this.currentPrediction) {
+                                    this.broadcastPredictionUpdate(data.timeframe);
+                                }
+                            }
+                            break;
                     }
                 } catch (error) {
                     logger.error('Error handling client message', error, 'WS_SERVER');
@@ -96,14 +109,14 @@ export class VisualizationService {
         logger.info(`Updating price data for ${token.symbol}`, 'WS_SERVER');
         this.currentToken = token;
         await this.storageService.saveMarketData(token);
-        this.broadcastPriceUpdate();
+        this.broadcastPriceUpdate('daily');
     }
 
     async updatePrediction(prediction: PricePrediction) {
         logger.info('Updating prediction data', 'WS_SERVER');
         this.currentPrediction = prediction;
         await this.storageService.savePredictionData(prediction);
-        this.broadcastPredictionUpdate();
+        this.broadcastPredictionUpdate('daily');
     }
 
     async updateData(token: TokenData, predictions: PricePrediction) {
@@ -116,7 +129,7 @@ export class VisualizationService {
         this.broadcastUpdate();
     }
 
-    private broadcastPriceUpdate() {
+    private broadcastPriceUpdate(timeframe: string = 'daily') {
         if (this.clients.size === 0 || !this.currentToken) return;
 
         // Calculate OHLC data from price points
@@ -146,13 +159,15 @@ export class VisualizationService {
             tokenName: this.currentToken.symbol,
             currentPrice: this.currentToken.prices[this.currentToken.prices.length - 1].price,
             volume: this.currentToken.prices[this.currentToken.prices.length - 1].volume,
-            priceData: priceData
+            priceData: priceData,
+            timeframe: timeframe,
+            rawData: this.currentToken // Include raw data for JSON display
         };
 
         this.broadcast(data);
     }
 
-    private broadcastPredictionUpdate() {
+    private broadcastPredictionUpdate(timeframe: string = 'daily') {
         if (this.clients.size === 0 || !this.currentToken || !this.currentPrediction) return;
 
         const data = {
@@ -179,16 +194,18 @@ export class VisualizationService {
                         confidence: p.confidence
                     };
                 })
-            }
+            },
+            timeframe: timeframe,
+            rawData: this.currentPrediction // Include raw data for JSON display
         };
 
         this.broadcast(data);
     }
 
     private broadcastUpdate() {
-        this.broadcastPriceUpdate();
+        this.broadcastPriceUpdate('daily');
         if (this.currentPrediction) {
-            this.broadcastPredictionUpdate();
+            this.broadcastPredictionUpdate('daily');
         }
     }
 
@@ -233,7 +250,9 @@ export class VisualizationService {
                             close,
                             volume: p.volume
                         };
-                    })
+                    }),
+                    timeframe: 'daily',
+                    rawData: this.currentToken
                 };
                 client.send(JSON.stringify(priceData));
 
@@ -262,7 +281,9 @@ export class VisualizationService {
                                     confidence: p.confidence
                                 };
                             })
-                        }
+                        },
+                        timeframe: 'daily',
+                        rawData: this.currentPrediction
                     };
                     client.send(JSON.stringify(predictionData));
                 }

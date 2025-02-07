@@ -18,7 +18,7 @@ interface CacheEntry<T> {
 
 export class AIService {
   private readonly openai: OpenAI;
-  private readonly model = 'deepseek/deepseek-chat';
+  private readonly model = 'x-ai/grok-2-1212';
   private readonly maxRetries = 3;
   private readonly retryDelay = 1000; // 1 second
   private readonly cacheTTL = {
